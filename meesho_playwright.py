@@ -5,8 +5,6 @@ from evpn import ExpressVpnApi
 from datetime import datetime
 import pymysql
 import random
-import pickle
-import hashlib
 import time
 import json
 import os
@@ -21,11 +19,14 @@ def change_vpn(api, locations):
 
 
 # Login function using Playwright
-def login(page, context):
+def login():
     fingerprint = FingerprintGenerator().generate()
     with sync_playwright() as play:
         browser = play.chromium.launch(headless=False)
-        context = NewContext(browser=browser, fingerprint=fingerprint)
+        # context = NewContext(browser=browser, fingerprint=fingerprint)
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+        context = NewContext(browser, fingerprint=fingerprint, user_agent=user_agent)
 
         # Create a new page and apply fingerprint
         page = context.new_page()
@@ -67,7 +68,10 @@ def login(page, context):
 
 
 # Function to send requests to a URL
-def send_request(page, url, pincode, api, locations):
+def send_request(page, url, pincode, api, locations, session_data):
+    # Set cookies for the current page's context
+    page.context.add_cookies(session_data['cookies'])
+
     page.goto(url)
 
     # Handle "Access Denied" scenarios
@@ -102,8 +106,8 @@ def send_request(page, url, pincode, api, locations):
             change_vpn(api, locations)
             print("Changing VPN...")
             return None
-    except:
-        pass
+    except Exception as e:
+        print(e)
 
     return page.content()  # Return the page content for further processing
 
@@ -120,6 +124,7 @@ def scraper(pincode, start_id, end_id):
         WHERE status='pending' AND status_{pincode} != 'Done' AND status_{pincode} != 'no option'
         AND id BETWEEN {start_id} AND {end_id}
         """
+    query = f"""SELECT Product_Url_MEESHO FROM template_20241017 WHERE `status` != 'Done' AND status_{pincode} != 'Done' AND id BETWEEN {start_id} AND {end_id}"""
     local_cursor.execute(query)
     rows = local_cursor.fetchall()
     print(len(rows), "total links found.")
@@ -132,13 +137,19 @@ def scraper(pincode, start_id, end_id):
         fingerprint = FingerprintGenerator().generate()
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=False, )
-            context = NewContext(browser, fingerprint=fingerprint)
+            # context = NewContext(browser, fingerprint=fingerprint)
+            user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
+            context = NewContext(browser, fingerprint=fingerprint, user_agent=user_agent)
             # Tarnished.apply_stealth(context)
 
             page = context.new_page()
-            # Set cookies for the current page's context
-            page.context.add_cookies(session_data['cookies'])
+
+            # Set the viewport size to match the screen size (fullscreen effect)
+            page.set_viewport_size({"width": 1920, "height": 1080})
+
+            # # Set cookies for the current page's context
+            # page.context.add_cookies(session_data['cookies'])
 
             # Navigate to the main website or another page to confirm login session is active
             # page.goto('https://www.meesho.com/best-quality-super-fine-100-percent-soft-cotton-vests-pack-of-4/p/6fptlv')
@@ -149,13 +160,14 @@ def scraper(pincode, start_id, end_id):
 
             # Add your scraping logic here, e.g., navigating to product pages and scraping content.
             print('sending req')
-            page_content = send_request(url=link, page=page, pincode=pincode, locations=locations, api=api)
+            page_content = send_request(url=link, page=page, pincode=pincode, locations=locations, api=api, session_data=session_data)
             print(page_content)
 
             if page_content:
                 # Generate unique hash ID for the page
-                page_id = hashlib.sha256((link + f'_{pincode}').encode()).hexdigest()
-                save_path = fr'pagesave_meesho/{page_id}.html'
+                # page_id = hashlib.sha256((link + f'_{pincode}').encode()).hexdigest()
+                page_save_name = f'{pid[0]}_{pincode}'
+                save_path = fr'../pagesave_meesho/{page_save_name}.html'
 
                 # Save the page content to a file
                 with open(save_path, 'w', encoding='utf-8') as file:
@@ -167,12 +179,12 @@ def scraper(pincode, start_id, end_id):
                 INSERT INTO mesho_pages (url, pincode, page_hash) 
                 VALUES (%s, %s, %s)
                 """
-                local_cursor.execute(insert_query, (link, pincode, page_id))
+                local_cursor.execute(insert_query, (link, pincode, page_save_name))
                 local_connect.commit()
                 print("inerted data to meesho page")
 
                 # Update product link status
-                update_query = f"UPDATE product_links SET status_{pincode} = 'Done' WHERE meesho_pid = %s"
+                update_query = f"UPDATE product_links_20241017 SET status_{pincode} = 'Done' WHERE meesho_pid = %s"
                 local_cursor.execute(update_query, (pid[0],))
                 local_connect.commit()
 
@@ -189,7 +201,7 @@ def main(pincode, start_id, end_id):
     else:
         print('Cookies not present...')
         # Attempt login if session storage is not found
-        logged_in = login(page, context)
+        logged_in = login()
         if logged_in:
             print("Login successful!")
             scraper(pincode, start_id, end_id)
@@ -225,11 +237,11 @@ if __name__ == "__main__":
         'surya': '9737090010',
     }
 
-    mobile_number = mobile_num_dict['siraj']
+    mobile_number = mobile_num_dict['hritik']
     # mobile_number = '9099071762'
     today_date = datetime.now().strftime("%Y%m%d")
     start_time = time.time()
-    session_storage_filename = fr"cookies/{mobile_number}_{today_date}_session_storage.json"
+    session_storage_filename = fr"../cookies/{mobile_number}_{today_date}_session_storage.json"
     with ExpressVpnApi() as api:
         locations = [{'id': 26, 'name': 'USA - New Jersey - 1', 'country_code': 'US'}, {'id': 168, 'name': 'USA - New Jersey - 3', 'country_code': 'US'},
                      {'id': 75, 'name': 'USA - New York', 'country_code': 'US'}, {'id': 166, 'name': 'USA - Tampa - 1', 'country_code': 'US'},
@@ -244,13 +256,13 @@ if __name__ == "__main__":
                      {'id': 6, 'name': 'USA - Los Angeles - 1', 'country_code': 'US'}, {'id': 71, 'name': 'USA - Los Angeles - 5', 'country_code': 'US'},
                      {'id': 207, 'name': 'USA - Santa Monica', 'country_code': 'US'}]
         change_vpn(api=api, locations=locations)
-        main(pincode="560001", start_id=6, end_id=10)
+        main(pincode="560001", start_id=31, end_id=10000)
     end_time = time.time()
 
     print("Time :", end_time - start_time)
 
 """
-siraj bhai : 8758356372
+siraj: 8758356372
 karan: 6359015644
 smitesh :9574945690
 pritesh: 9586653146
