@@ -44,6 +44,7 @@ local_cursor = local_connect.cursor()
 
 today_date = datetime.now().strftime("%Y%m%d")
 pages_tablename = f'pages_{today_date}'
+template_tablename = f'template_20241017_distinct_instockstatus'
 
 local_cursor.execute(f'''CREATE TABLE IF NOT EXISTS {pages_tablename} (id int AUTO_INCREMENT PRIMARY KEY,
 url varchar(1000),
@@ -126,7 +127,7 @@ def scrapping(link, driver):
         driver.execute_script("arguments[0].scrollIntoView();", review)
 
         try:
-            pin_input = WebDriverWait(driver, 1).until(
+            pin_input = WebDriverWait(driver, timeout=3).until(
                 EC.visibility_of_element_located((By.XPATH, '//input[@id="pin"]')))
 
             if pincode == pin_input.get_attribute('value'):
@@ -137,7 +138,7 @@ def scrapping(link, driver):
                     small_random_waite()
                 pin_input.send_keys(pincode)
         except Exception as e:
-            print('Input is not available')
+            print('Input is not available', e)
             return
 
         element = WebDriverWait(driver, 2).until(
@@ -182,18 +183,17 @@ def scrapping(link, driver):
 
         page_id = link.split('/')[-1] + f'_{pincode}'
 
-        with zipfile.ZipFile(fr'../meesho/shipping_page/{page_id}' + '.zip', 'w',
+        with zipfile.ZipFile(fr'../shipping_page/{page_id}' + '.zip', 'w',
                              zipfile.ZIP_DEFLATED) as zip_file:
             zip_file.writestr(f'HTML_{page_id}.html', driver.page_source)
         insert_query = f"""INSERT INTO {pages_tablename}(url, pincode, page_hash, status) VALUES (%s, %s, %s, %s)"""
         local_cursor.execute(insert_query, (link, pincode, page_id, 'done'))
         local_connect.commit()
-        update_query = f"""UPDATE template_20241017_distinct SET status_560001 = 'done' WHERE Product_Url_MEESHO = %s"""
+        update_query = f"""UPDATE {template_tablename} SET status_560001 = 'done' WHERE Product_Url_MEESHO = %s"""
         cursor.execute(update_query, (link,))
         connect.commit()
 
         scraped_data_count += 1
-
 
     except Exception as e:
         print("Main Exp", e)
@@ -241,7 +241,7 @@ driver2 = create_session(session_storage_filename2)
 driver3 = create_session(session_storage_filename3)
 driver4 = create_session(session_storage_filename4)
 
-query = f"SELECT Product_Url_MEESHO FROM template_20241017_distinct WHERE `status` != 'Done' AND status_{pincode} != 'Done' AND id BETWEEN 1 AND 16000"
+query = f"SELECT Product_Url_MEESHO FROM {template_tablename} WHERE `status` != 'Done' AND `status_{pincode}` != 'Done' AND `In_Stock_Status_MEESHO` = 'true' AND `id` BETWEEN 1 AND 16000"
 cursor.execute(query)
 rows = cursor.fetchall()
 co_p = 1
